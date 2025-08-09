@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lamumu Smash — Simple</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <meta
+      name="description"
+      content="Lamumu Smash — tap to smash enemies in a quick, mobile-friendly reflex game."
+    />
+    <style>
+      html,
+      body {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background-image: url("lamumu.jpg");
+        background-size: contain;
+        background-position: center;
+        background-repeat: no-repeat;
+        /* Fallback color if image is missing */
+        background-color: #0f172a; /* slate-900 */
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-slate-900 text-white antialiased">
+    <div class="min-h-screen flex items-center justify-center p-4">
+      <div class="w-full max-w-sm">
+        <!-- Header / HUD -->
+        <h1 class="text-center text-2xl font-extrabold tracking-tight mb-4">
+          Lamumu Smash
+        </h1>
+        <div
+          class="flex items-center justify-between text-sm font-semibold mb-3"
+        >
+          <div id="scoreDisplay" aria-live="polite">Score: 0</div>
+          <div id="timeDisplay" aria-live="polite">Time: 60s</div>
+        </div>
+
+        <!-- Game Area -->
+        <div
+          id="gameArea"
+          class="relative mx-auto border-4 border-emerald-700 bg-emerald-600/70 rounded-2xl shadow-xl overflow-hidden select-none"
+          style="width: 300px; height: 400px"
+          role="application"
+          aria-label="Game area"
+        ></div>
+
+        <!-- Controls -->
+        <div class="mt-4 flex items-center justify-center gap-2">
+          <button
+            id="startBtn"
+            class="px-5 py-3 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 active:scale-[0.98] transition shadow-lg font-bold"
+            type="button"
+          >
+            Start Game
+          </button>
+        </div>
+
+        <p class="text-center text-xs text-slate-300 mt-3">
+          Tap/click the popping heads as fast as you can!
+        </p>
+      </div>
+    </div>
+
+    <script>
+      // ======== Simple Config (change values here) ========
+      const GAME_DURATION_MS = 60_000; // 60 seconds
+      const ENEMY_LIFETIME_MS = 800; // each enemy stays for 0.8s
+      const START_SPAWN_INTERVAL_MS = 700; // initial spawn frequency
+      const MIN_SPAWN_INTERVAL_MS = 250; // fastest allowed spawn interval
+      const ENEMY_SIZE_PX = 96; // enemy image size
+
+      // Change ONLY this line to swap the enemy image (e.g. './assets/cow-head.png')
+      const ENEMY_IMAGE_SRC = "./cow-head.png";
+      // Placeholder SVG data URL (cow-ish head). Replace with './cow-head.png' or your NFT image URL.
+      "data:image/svg+xml;utf8," +
+        encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+            <rect width="200" height="200" rx="16" fill="#ffe8e8"/>
+            <circle cx="64" cy="64" r="42" fill="#fff" stroke="#222" stroke-width="4"/>
+            <circle cx="48" cy="60" r="6" fill="#222"/>
+            <circle cx="80" cy="60" r="6" fill="#222"/>
+            <path d="M44 86 Q64 98 84 86" fill="none" stroke="#f43f5e" stroke-width="6" stroke-linecap="round"/>
+            <path d="M24 40 Q36 30 44 42" fill="none" stroke="#222" stroke-width="6" stroke-linecap="round"/>
+            <path d="M104 40 Q92 30 84 42" fill="none" stroke="#222" stroke-width="6" stroke-linecap="round"/>
+          </svg>
+        `);
+
+      // ======== Element refs ========
+      const gameArea = document.getElementById("gameArea");
+      const startBtn = document.getElementById("startBtn");
+      const scoreDisplay = document.getElementById("scoreDisplay");
+      const timeDisplay = document.getElementById("timeDisplay");
+
+      // ======== State ========
+      let score = 0;
+      let remainingMs = GAME_DURATION_MS;
+      let isRunning = false;
+      let spawnTimeoutId = null;
+      let timerIntervalId = null;
+
+      // ======== Helpers ========
+      function resetGame() {
+        score = 0;
+        remainingMs = GAME_DURATION_MS;
+        scoreDisplay.textContent = "Score: " + score;
+        timeDisplay.textContent =
+          "Time: " + Math.ceil(remainingMs / 1000) + "s";
+        // Clean any remaining enemies
+        [...gameArea.querySelectorAll("img.enemy")].forEach((el) =>
+          el.remove()
+        );
+        // Clear any pending spawn
+        clearTimeout(spawnTimeoutId);
+        spawnTimeoutId = null;
+      }
+
+      function endGame() {
+        isRunning = false;
+        clearTimeout(spawnTimeoutId);
+        clearInterval(timerIntervalId);
+        startBtn.disabled = false;
+        startBtn.classList.remove("opacity-60", "cursor-not-allowed");
+        alert("Game Over! You smashed " + score + " rugs!");
+      }
+
+      function spawnEnemy() {
+        if (!isRunning) return;
+
+        const rect = gameArea.getBoundingClientRect();
+        const maxX = rect.width - ENEMY_SIZE_PX;
+        const maxY = rect.height - ENEMY_SIZE_PX;
+        const x = Math.max(0, Math.floor(Math.random() * (maxX + 1)));
+        const y = Math.max(0, Math.floor(Math.random() * (maxY + 1)));
+
+        const img = document.createElement("img");
+        img.src = ENEMY_IMAGE_SRC;
+        img.alt = "Enemy head";
+        img.width = ENEMY_SIZE_PX;
+        img.height = ENEMY_SIZE_PX;
+        img.draggable = false;
+        img.className =
+          "enemy absolute transition-transform duration-75 ease-out drop-shadow-lg active:scale-95";
+        img.style.left = x + "px";
+        img.style.top = y + "px";
+
+        // Click handler
+        const onHit = (ev) => {
+          ev.stopPropagation();
+          if (!isRunning) return;
+          score += 1;
+          scoreDisplay.textContent = "Score: " + score;
+          // Small hit feedback
+          img.style.transform = "scale(0.9)";
+          setTimeout(() => img.remove(), 50);
+          // Haptic hint on supported devices
+          if (navigator.vibrate) {
+            try {
+              navigator.vibrate(10);
+            } catch (_) {}
+          }
+        };
+        img.addEventListener("click", onHit, { once: true });
+        img.addEventListener("touchstart", onHit, {
+          once: true,
+          passive: true,
+        });
+
+        gameArea.appendChild(img);
+
+        // Auto-remove after lifetime
+        setTimeout(() => {
+          img.remove();
+        }, ENEMY_LIFETIME_MS);
+      }
+
+      // Dynamically schedule spawns faster over time
+      function scheduleSpawn() {
+        if (!isRunning) return;
+        // Spawn one now
+        spawnEnemy();
+        // Compute current interval based on progress of the round (linear acceleration)
+        const progress = 1 - remainingMs / GAME_DURATION_MS; // 0 -> 1
+        const interval = Math.max(
+          MIN_SPAWN_INTERVAL_MS,
+          Math.round(
+            START_SPAWN_INTERVAL_MS -
+              (START_SPAWN_INTERVAL_MS - MIN_SPAWN_INTERVAL_MS) * progress
+          )
+        );
+        spawnTimeoutId = setTimeout(scheduleSpawn, interval);
+      }
+
+      function startGame() {
+        if (isRunning) return;
+        resetGame();
+        isRunning = true;
+        startBtn.disabled = true;
+        startBtn.classList.add("opacity-60", "cursor-not-allowed");
+
+        // Spawn loop with dynamic acceleration
+        scheduleSpawn();
+
+        // Timer loop
+        const tick = 1000;
+        timerIntervalId = setInterval(() => {
+          remainingMs -= tick;
+          if (remainingMs <= 0) {
+            timeDisplay.textContent = "Time: 0s";
+            endGame();
+          } else {
+            timeDisplay.textContent =
+              "Time: " + Math.ceil(remainingMs / 1000) + "s";
+          }
+        }, tick);
+      }
+
+      // ======== Wire controls ========
+      startBtn.addEventListener("click", startGame);
+      // Keyboard accessibility: space/enter to start
+      document.addEventListener("keydown", (e) => {
+        if ((e.key === " " || e.key === "Enter") && !isRunning) {
+          startGame();
+        }
+      });
+
+      // Keep game area centered and responsive; upscale slightly on wider screens
+      // Tailwind handles most of it; optional: adjust size on larger screens
+      const mq = window.matchMedia("(min-width: 640px)");
+      function applyResponsiveSize() {
+        // Use Tailwind arbitrary sizes via inline style to keep single-file simplicity
+        if (mq.matches) {
+          gameArea.style.width = "400px";
+          gameArea.style.height = "480px";
+        } else {
+          gameArea.style.width = "350px";
+          gameArea.style.height = "400px";
+        }
+      }
+      applyResponsiveSize();
+      mq.addEventListener?.("change", applyResponsiveSize);
+      window.addEventListener("orientationchange", applyResponsiveSize);
+    </script>
+  </body>
+</html>
